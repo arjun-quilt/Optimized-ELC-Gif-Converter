@@ -508,25 +508,11 @@ if st.button("Process"):
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 
-                # Process TikTok videos in batches
-                batch_size = 5
-                all_dataset_ids = []
+                # Run the async function for all TikTok videos at once
+                success, dataset_ids = loop.run_until_complete(process_tiktok_videos(tiktok_urls))
                 
-                for i in range(0, len(tiktok_urls), batch_size):
-                    batch = tiktok_urls[i:i + batch_size]
-                    st.write(f"Processing batch {i//batch_size + 1}/{(len(tiktok_urls) + batch_size - 1)//batch_size}")
-                    
-                    # Run the async function for this batch
-                    success, dataset_ids = loop.run_until_complete(process_tiktok_videos(batch))
-                    
-                    if not success:
-                        st.error(f"Apify task failed for batch {i//batch_size + 1}. Please try again.")
-                        continue
-                        
-                    all_dataset_ids.extend(dataset_ids)
-                    
-                if not all_dataset_ids:
-                    st.error("No successful batches processed. Please try again.")
+                if not success:
+                    st.error("Apify task failed. Please try again.")
                     st.session_state.processing = False
                     st.stop()
                     
@@ -534,7 +520,7 @@ if st.button("Process"):
                 
                 # Fetch items from all datasets
                 all_items = []
-                for dataset_id in all_dataset_ids:
+                for dataset_id in dataset_ids:
                     try:
                         dataset = loop.run_until_complete(get_items(dataset_id))
                         all_items.extend(dataset)
@@ -587,7 +573,6 @@ if st.button("Process"):
             st.write(f"Processing {len(gcs_urls)} GCS videos...")
             for input_dict in cleaned_input_list:
                 if isinstance(input_dict["Links"],str) and ("storage.googleapis.com" in input_dict["Links"]):
-                # if "storage.googleapis.com" in input_dict["Links"]:
                     input_dict["Gcs Url"] = input_dict["Links"]
 
         # Process Douyin videos if any
