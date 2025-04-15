@@ -714,7 +714,12 @@ if st.button("Process"):
             st.write(f"Saved intermediate results after batch {batch_start//batch_size + 1}")
             
             # Clear memory after each batch
-            gc.collect()
+            st.cache_data.clear()  # Clear Streamlit data cache
+            st.cache_resource.clear()  # Clear Streamlit resource cache
+            gc.collect()  # Force garbage collection
+            
+            # Add a small delay to allow memory cleanup
+            time.sleep(1)
         
         # Store final results in session state
         st.session_state.final_results = pd.DataFrame(list_of_dicts)
