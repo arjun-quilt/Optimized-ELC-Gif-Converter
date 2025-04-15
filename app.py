@@ -611,94 +611,96 @@ if st.button("Process"):
         
         max_retries = 3  # Reduce the number of retries for faster processing
         retry_delay = 5  # Shorter delay between retries (in seconds)
+        batch_size = 50  # Process videos in batches of 50
 
         # Initialize a dictionary to track processed URLs and their GIF URLs
         processed_urls = {}
 
-        # Initialize gif_path at the beginning of the block
-        gif_path = None
-
-        for index, raw_row in enumerate(list_of_dicts, 1):
-            gcs_url = raw_row["Gcs Url"]
-            try:
-                # Log the current row being processed
-                print(f"Processing row {index}: GCS URL = {gcs_url}")
-                
-                # Skip if GCS URL is NaN or empty
-                if pd.isna(gcs_url) or not gcs_url:
-                    print("Skipping due to missing GCS URL.")
-                    continue
-
-                # Check if the URL has already been processed
-                if gcs_url in processed_urls:
-                    # Assign the existing GIF URL to the current row
-                    raw_row["GIF"] = processed_urls[gcs_url]
-                    print(f"Row {index} already processed. Assigned existing GIF URL: {raw_row['GIF']}")
-                    continue  # Skip further processing for this row
-
-                video_id = gcs_url.split("/")[-1].split(".")[0]
-                temp_video_path = f"{video_id}.mp4"
-
-                # Retry logic for downloading the video
-                for attempt in range(max_retries + 1):  # +1 to include the first attempt
-                    try:
-                        urllib.request.urlretrieve(gcs_url, temp_video_path)
-                        break  # Break if download is successful
-                    except Exception as e:
-                        print(f"[WARNING] Attempt {attempt + 1} failed: {str(e)}")
-                        if attempt < max_retries:
-                            time.sleep(retry_delay)
-                        else:
-                            print(f"[ERROR] Failed to download video after {max_retries} attempts.")
-                            raw_row["GIF"] = None  # Assign None if download fails
-                            continue
-
-                # Proceed with GIF conversion and upload
-                gif_path = convert_to_gif(temp_video_path, video_id)  # Ensure gif_path is set here
-                
+        # Process videos in batches
+        for batch_start in range(0, total_videos, batch_size):
+            batch_end = min(batch_start + batch_size, total_videos)
+            batch = list_of_dicts[batch_start:batch_end]
+            
+            st.write(f"Processing batch {batch_start//batch_size + 1}/{(total_videos + batch_size - 1)//batch_size}")
+            
+            for index, raw_row in enumerate(batch, batch_start + 1):
+                gcs_url = raw_row["Gcs Url"]
                 try:
-                    # Check if GIF was created successfully
-                    if not os.path.exists(gif_path):
-                        raise Exception(f"GIF not created for video ID: {video_id}")
+                    # Log the current row being processed
+                    print(f"Processing row {index}: GCS URL = {gcs_url}")
                     
-                    # Upload GIF to GCS
-                    bucket_name = "tiktok-actor-content"
-                    gcs_folder = "gifs_20240419"
-                    gif_url = upload_gif_to_gcs(gif_path, video_id, bucket_name, gcs_folder)
-                    
-                    # Clean up temporary files
-                    if os.path.exists(temp_video_path):
-                        os.unlink(temp_video_path)
-                    if gif_path and os.path.exists(gif_path):  # Check if gif_path is defined
-                        os.unlink(gif_path)
-                    
-                    # Assign the GIF URL to the row
-                    raw_row["GIF"] = gif_url
-                    processed_urls[gcs_url] = gif_url  # Store the GIF URL for future reference
-                    print(f"Row {index} GIF URL assigned: {gif_url}")
-                    
+                    # Skip if GCS URL is NaN or empty
+                    if pd.isna(gcs_url) or not gcs_url:
+                        print("Skipping due to missing GCS URL.")
+                        continue
+
+                    # Check if the URL has already been processed
+                    if gcs_url in processed_urls:
+                        raw_row["GIF"] = processed_urls[gcs_url]
+                        print(f"Row {index} already processed. Assigned existing GIF URL: {raw_row['GIF']}")
+                        continue
+
+                    video_id = gcs_url.split("/")[-1].split(".")[0]
+                    temp_video_path = f"{video_id}.mp4"
+                    gif_path = None
+
+                    try:
+                        # Download video with retries
+                        for attempt in range(max_retries + 1):
+                            try:
+                                urllib.request.urlretrieve(gcs_url, temp_video_path)
+                                break
+                            except Exception as e:
+                                print(f"[WARNING] Attempt {attempt + 1} failed: {str(e)}")
+                                if attempt < max_retries:
+                                    time.sleep(retry_delay)
+                                else:
+                                    print(f"[ERROR] Failed to download video after {max_retries} attempts.")
+                                    raw_row["GIF"] = None
+                                    continue
+
+                        # Convert to GIF
+                        gif_path = convert_to_gif(temp_video_path, video_id)
+                        
+                        if not os.path.exists(gif_path):
+                            raise Exception(f"GIF not created for video ID: {video_id}")
+                        
+                        # Upload GIF to GCS
+                        bucket_name = "tiktok-actor-content"
+                        gcs_folder = "gifs_20240419"
+                        gif_url = upload_gif_to_gcs(gif_path, video_id, bucket_name, gcs_folder)
+                        
+                        # Assign the GIF URL
+                        raw_row["GIF"] = gif_url
+                        processed_urls[gcs_url] = gif_url
+                        print(f"Row {index} GIF URL assigned: {gif_url}")
+                        
+                    finally:
+                        # Clean up temporary files
+                        if os.path.exists(temp_video_path):
+                            os.unlink(temp_video_path)
+                        if gif_path and os.path.exists(gif_path):
+                            os.unlink(gif_path)
+                        
+                        # Force garbage collection after each video
+                        gc.collect()
+
                 except Exception as e:
                     print(f"[ERROR] Failed to process row {index}: {str(e)}")
-                    # Clean up temporary files if they exist
-                    if os.path.exists(temp_video_path):
-                        os.unlink(temp_video_path)
-                    if gif_path and os.path.exists(gif_path):  # Check if gif_path is defined
-                        os.unlink(gif_path)
-                    raw_row["GIF"] = None  # Assign None if any error occurs
+                    raw_row["GIF"] = None
 
-            except Exception as e:
-                print(f"[ERROR] Failed to process row {index}: {str(e)}")
-                # Clean up temporary files if they exist
-                if os.path.exists(temp_video_path):
-                    os.unlink(temp_video_path)
-                if gif_path and os.path.exists(gif_path):  # Check if gif_path is defined
-                    os.unlink(gif_path)
-                raw_row["GIF"] = None  # Assign None if any error occurs
-
-            # Update overall progress
-            progress_percent = int((index / total_videos) * 100)
-            overall_progress.progress(progress_percent, text=f"Processed {index}/{total_videos} videos")
-
+                # Update progress
+                progress_percent = int((index / total_videos) * 100)
+                overall_progress.progress(progress_percent, text=f"Processed {index}/{total_videos} videos")
+            
+            # Save intermediate results after each batch
+            intermediate_df = pd.DataFrame(list_of_dicts)
+            intermediate_df.to_csv(f"{country_name}_trend_gifs_intermediate.csv", index=False, encoding="utf_8_sig")
+            st.write(f"Saved intermediate results after batch {batch_start//batch_size + 1}")
+            
+            # Clear memory after each batch
+            gc.collect()
+        
         # Store final results in session state
         st.session_state.final_results = pd.DataFrame(list_of_dicts)
         st.session_state.final_results.to_csv(f"{country_name}_trend_gifs.csv", index=False, encoding="utf_8_sig")
