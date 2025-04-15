@@ -508,11 +508,25 @@ if st.button("Process"):
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 
-                # Run the async function
-                success, dataset_ids = loop.run_until_complete(process_tiktok_videos(tiktok_urls))
+                # Process TikTok videos in batches
+                batch_size = 5
+                all_dataset_ids = []
                 
-                if not success:
-                    st.error("Apify task failed. Please try again.")
+                for i in range(0, len(tiktok_urls), batch_size):
+                    batch = tiktok_urls[i:i + batch_size]
+                    st.write(f"Processing batch {i//batch_size + 1}/{(len(tiktok_urls) + batch_size - 1)//batch_size}")
+                    
+                    # Run the async function for this batch
+                    success, dataset_ids = loop.run_until_complete(process_tiktok_videos(batch))
+                    
+                    if not success:
+                        st.error(f"Apify task failed for batch {i//batch_size + 1}. Please try again.")
+                        continue
+                        
+                    all_dataset_ids.extend(dataset_ids)
+                    
+                if not all_dataset_ids:
+                    st.error("No successful batches processed. Please try again.")
                     st.session_state.processing = False
                     st.stop()
                     
@@ -520,9 +534,13 @@ if st.button("Process"):
                 
                 # Fetch items from all datasets
                 all_items = []
-                for dataset_id in dataset_ids:
-                    dataset = loop.run_until_complete(get_items(dataset_id))
-                    all_items.extend(dataset)
+                for dataset_id in all_dataset_ids:
+                    try:
+                        dataset = loop.run_until_complete(get_items(dataset_id))
+                        all_items.extend(dataset)
+                    except Exception as e:
+                        st.warning(f"Failed to fetch items from dataset {dataset_id}: {str(e)}")
+                        continue
                 
                 st.write(f"Fetched {len(all_items)} items from all datasets.")
                 
