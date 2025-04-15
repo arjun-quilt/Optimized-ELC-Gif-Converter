@@ -213,7 +213,6 @@ async def check_run_status(run_id: str, api_token: str, status_placeholder) -> b
             status_placeholder.warning(f"Run {run_id}: Request failed - {str(e)}")
             await asyncio.sleep(retry_delay)
 
-@st.cache_resource
 async def process_tiktok_videos(tiktok_videos: List[str], batch_size: int = 5):
     """Process all TikTok videos in parallel batches"""
     if not tiktok_videos:
